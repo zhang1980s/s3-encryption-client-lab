@@ -1,0 +1,20 @@
+# Build artifacts
+target/
+
+# Generated keys
+keys/
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# Logs
+*.log
+
+# OS specific files
+.DS_Store
+Thumbs.db
