@@ -8,10 +8,12 @@ import xyz.zzhe.s3encryptionclientlab.service.FileUploadService;
 import xyz.zzhe.s3encryptionclientlab.service.S3FileUploadEncryptionService;
 import xyz.zzhe.s3encryptionclientlab.util.KeyPairUtil;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.util.StringUtils;
 import software.amazon.encryption.s3.S3EncryptionClient;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -54,10 +56,26 @@ public class S3EncryptionClientLabApplication {
                 log.info("RSA key pair loaded from {}", keysDir.toAbsolutePath());
             }
 
-            // Create S3 encryption client
-            S3EncryptionClient s3EncryptionClient = S3EncryptionClient.builder()
-                    .rsaKeyPair(keyPair)
-                    .build();
+            // Try to create S3 encryption client from properties first
+            S3EncryptionClient s3EncryptionClient = createEncryptionS3Client(s3Properties.getClientConfig());
+            
+            // If client creation from properties failed, use the file-based key pair
+            if (s3EncryptionClient == null) {
+                log.info("Creating S3 encryption client from file-based key pair");
+                s3EncryptionClient = S3EncryptionClient.builder()
+                        .rsaKeyPair(keyPair)
+                        .build();
+                
+                // Update the properties with the generated keys for future use
+                try {
+                    String publicKeyContent = new String(Files.readAllBytes(publicKeyPath));
+                    String privateKeyContent = new String(Files.readAllBytes(privateKeyPath));
+                    s3Properties.getClientConfig().setRsaPublicPem(publicKeyContent);
+                    s3Properties.getClientConfig().setRsaPrivatePem(privateKeyContent);
+                } catch (IOException e) {
+                    log.warn("Could not read key files to update properties", e);
+                }
+            }
 
             // Create file upload service
             AbstractFileUploadConfig uploadConfig = new AbstractFileUploadConfig(s3Properties.getBucketName()) {};
@@ -114,5 +132,30 @@ public class S3EncryptionClientLabApplication {
         
         log.info("Created test file: {}", tempFile.getAbsolutePath());
         return tempFile;
+    }
+    
+    /**
+     * Creates an S3EncryptionClient from the provided client configuration.
+     *
+     * @param clientConfig The client configuration containing RSA key PEM strings
+     * @return An S3EncryptionClient instance, or null if the configuration is invalid
+     */
+    private static S3EncryptionClient createEncryptionS3Client(final S3Properties.S3FileUploadClientConfig clientConfig) {
+        if (clientConfig == null ||
+            !StringUtils.hasText(clientConfig.getRsaPrivatePem()) ||
+            !StringUtils.hasText(clientConfig.getRsaPublicPem())) {
+            log.info("No valid RSA keys found in configuration");
+            return null;
+        }
+        
+        log.info("Creating S3 encryption client from configuration PEM strings");
+        KeyPair keyPair = S3FileUploadEncryptionService.reconstructKeyPair(
+            clientConfig.getRsaPublicPem(),
+            clientConfig.getRsaPrivatePem()
+        );
+        
+        return S3EncryptionClient.builder()
+                .rsaKeyPair(keyPair)
+                .build();
     }
 }

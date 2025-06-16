@@ -67,6 +67,13 @@
             <version>1.18.24</version>
             <scope>provided</scope>
         </dependency>
+        
+        <!-- Spring Core for StringUtils -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-core</artifactId>
+            <version>5.3.27</version>
+        </dependency>
     </dependencies>
 
     <build>

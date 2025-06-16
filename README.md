@@ -54,9 +54,11 @@ This lab application demonstrates how to use the Amazon S3 Encryption Client for
 ### Exercise 1: Setting up the encryption client
 
 The lab demonstrates how to set up the S3 encryption client using RSA key pairs. The S3EncryptionClientLabApplication will:
-- Generate a new RSA key pair if one doesn't exist
+- First try to create the client using RSA keys from application.properties
+- If that fails, generate a new RSA key pair if one doesn't exist
 - Save the key pair to the `keys` directory
 - Create an S3 encryption client using the key pair
+- Update the application properties with the generated keys for future use
 
 ### Exercise 2: Uploading encrypted objects
 
@@ -85,6 +87,34 @@ The lab demonstrates how to generate pre-signed URLs for encrypted objects. The 
 - Encryption context
 - Key rotation
 - Cross-account access to encrypted objects
+
+## Key Features
+
+### Client Creation Methods
+
+The application supports two ways of creating the S3 encryption client:
+
+1. **From Configuration**: Using the `createEncryptionS3Client` method that reads RSA key PEM strings from the configuration:
+   ```java
+   private static S3EncryptionClient createEncryptionS3Client(final S3Properties.S3FileUploadClientConfig clientConfig) {
+       if (clientConfig == null ||
+           !StringUtils.hasText(clientConfig.getRsaPrivatePem()) ||
+           !StringUtils.hasText(clientConfig.getRsaPublicPem())) {
+           return null;
+       }
+       
+       KeyPair keyPair = S3FileUploadEncryptionService.reconstructKeyPair(
+           clientConfig.getRsaPublicPem(),
+           clientConfig.getRsaPrivatePem()
+       );
+       
+       return S3EncryptionClient.builder()
+               .rsaKeyPair(keyPair)
+               .build();
+   }
+   ```
+
+2. **From Files**: Loading or generating key pairs from files in the `keys` directory.
 
 ## Resources
 
