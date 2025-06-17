@@ -263,49 +263,24 @@ WRAPPED_KEY_PATH="/tmp/wrapped_key.bin"
 
 # Create a new KMS key with EXTERNAL origin
 echo "Creating new KMS key with EXTERNAL origin..."
-NEW_KEY_ID=$(aws kms create-key --description "KMS key for S3 encryption client lab (EXTERNAL)" \
-		--origin EXTERNAL \
-		--tags TagKey=Name,TagValue=s3-encryption-lab-kms-key-external \
-		--query 'KeyMetadata.KeyId' --output text)
+NEW_KEY_ID=$(aws kms create-key --description "KMS key for S3 encryption client lab (EXTERNAL)" --origin EXTERNAL --tags TagKey=Name,TagValue=s3-encryption-lab-kms-key-external --query 'KeyMetadata.KeyId' --output text)
 
 echo "Created new KMS key with ID: $NEW_KEY_ID"
 echo "NEW_KMS_KEY_ID=$NEW_KEY_ID" >> /home/ec2-user/kms_env.sh
 
 # Get parameters for import
 echo "Getting import parameters..."
-aws kms get-parameters-for-import \
-		--key-id $NEW_KEY_ID \
-		--wrapping-algorithm RSAES_OAEP_SHA_1 \
-		--wrapping-key-spec RSA_2048 \
-		--output text \
-		--query 'PublicKey' > $PUBLIC_KEY_PATH
+aws kms get-parameters-for-import --key-id $NEW_KEY_ID --wrapping-algorithm RSAES_OAEP_SHA_1 --wrapping-key-spec RSA_2048 --output text --query 'PublicKey' > $PUBLIC_KEY_PATH
 
-aws kms get-parameters-for-import \
-		--key-id $NEW_KEY_ID \
-		--wrapping-algorithm RSAES_OAEP_SHA_1 \
-		--wrapping-key-spec RSA_2048 \
-		--output text \
-		--query 'ImportToken' > $IMPORT_TOKEN_PATH
+aws kms get-parameters-for-import --key-id $NEW_KEY_ID --wrapping-algorithm RSAES_OAEP_SHA_1 --wrapping-key-spec RSA_2048 --output text --query 'ImportToken' > $IMPORT_TOKEN_PATH
 
 # Wrap the key material using OpenSSL
 echo "Wrapping key material..."
-openssl pkeyutl \
-		-encrypt \
-		-in /home/ec2-user/keys/private_key.pem \
-		-out $WRAPPED_KEY_PATH \
-		-inkey $PUBLIC_KEY_PATH \
-		-keyform DER \
-		-pubin \
-		-pkeyopt rsa_padding_mode:oaep \
-		-pkeyopt rsa_oaep_md:sha1
+openssl pkeyutl -encrypt -in /home/ec2-user/keys/private_key.pem -out $WRAPPED_KEY_PATH -inkey $PUBLIC_KEY_PATH -keyform DER -pubin -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha1
 
 # Import the wrapped key material
 echo "Importing key material..."
-aws kms import-key-material \
-		--key-id $NEW_KEY_ID \
-		--encrypted-key-material fileb://$WRAPPED_KEY_PATH \
-		--import-token fileb://$IMPORT_TOKEN_PATH \
-		--expiration-model KEY_MATERIAL_DOES_NOT_EXPIRE
+aws kms import-key-material --key-id $NEW_KEY_ID --encrypted-key-material fileb://$WRAPPED_KEY_PATH --import-token fileb://$IMPORT_TOKEN_PATH --expiration-model KEY_MATERIAL_DOES_NOT_EXPIRE
 
 echo "Key material imported successfully!"
 echo "Use the NEW_KMS_KEY_ID from kms_env.sh in your application"
