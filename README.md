@@ -1,6 +1,24 @@
 # Amazon S3 Encryption Client Lab Application
 
-This lab application demonstrates how to use the Amazon S3 Encryption Client for Java to perform client-side encryption of data stored in Amazon S3.
+This lab application demonstrates how to use the Amazon S3 Encryption Client for Java to perform client-side encryption of data stored in Amazon S3. It uses AWS KMS for secure key management.
+
+## Architecture
+
+```
+┌─────────────────┐     ┌───────────────┐     ┌───────────────┐
+│                 │     │               │     │               │
+│  Java           │     │  AWS KMS      │     │  Amazon S3    │
+│  Application    │◄────┤  (Key         │     │  (Encrypted   │
+│                 │     │  Management)  │     │  Objects)     │
+│                 │     │               │     │               │
+└────────┬────────┘     └───────────────┘     └───────┬───────┘
+         │                                            │
+         │                                            │
+         │           Encrypted Data                   │
+         └────────────────────────────────────────────┘
+```
+
+The application uses AWS KMS to securely store and retrieve encryption keys, which are then used by the S3 Encryption Client to encrypt data before uploading to S3 and decrypt data after downloading from S3.
 
 ## Prerequisites
 
@@ -51,14 +69,12 @@ This lab application demonstrates how to use the Amazon S3 Encryption Client for
 
 ## Lab Exercises
 
-### Exercise 1: Setting up the encryption client
+### Exercise 1: Setting up the encryption client with AWS KMS
 
-The lab demonstrates how to set up the S3 encryption client using RSA key pairs. The S3EncryptionClientLabApplication will:
-- First try to create the client using RSA keys from application.properties
-- If that fails, generate a new RSA key pair if one doesn't exist
-- Save the key pair to the `keys` directory
-- Create an S3 encryption client using the key pair
-- Update the application properties with the generated keys for future use
+The lab demonstrates how to set up the S3 encryption client using RSA key pairs stored in AWS KMS. The S3EncryptionClientLabApplication will:
+- Load the KMS key ID from application.properties
+- Retrieve the RSA key pair from KMS
+- Create an S3 encryption client using the key pair from KMS
 
 ### Exercise 2: Uploading encrypted objects
 
@@ -90,31 +106,37 @@ The lab demonstrates how to generate pre-signed URLs for encrypted objects. The 
 
 ## Key Features
 
-### Client Creation Methods
+### AWS KMS Integration
 
-The application supports two ways of creating the S3 encryption client:
+The application uses AWS KMS for secure key management:
 
-1. **From Configuration**: Using the `createEncryptionS3Client` method that reads RSA key PEM strings from the configuration:
+1. **Key Storage**: The RSA key pair is stored securely in AWS KMS as tags on a KMS key.
+
+2. **Key Retrieval**: The `KmsKeyService` retrieves the key material from KMS:
    ```java
-   private static S3EncryptionClient createEncryptionS3Client(final S3Properties.S3FileUploadClientConfig clientConfig) {
-       if (clientConfig == null ||
-           !StringUtils.hasText(clientConfig.getRsaPrivatePem()) ||
-           !StringUtils.hasText(clientConfig.getRsaPublicPem())) {
-           return null;
-       }
+   public KeyPair getKeyPairFromKms() {
+       // Get key tags which contain our key material
+       ListResourceTagsResponse tagsResponse = kmsClient.listResourceTags(
+               ListResourceTagsRequest.builder()
+                       .keyId(keyId)
+                       .build());
        
-       KeyPair keyPair = S3FileUploadEncryptionService.reconstructKeyPair(
-           clientConfig.getRsaPublicPem(),
-           clientConfig.getRsaPrivatePem()
-       );
+       Map<String, String> tags = tagsResponse.tags().stream()
+               .collect(Collectors.toMap(Tag::tagKey, Tag::tagValue));
        
-       return S3EncryptionClient.builder()
-               .rsaKeyPair(keyPair)
-               .build();
+       String publicKeyContent = tags.get("PublicKey");
+       String privateKeyContent = tags.get("PrivateKey");
+       
+       // Format the key content back to PEM format and reconstruct the key pair
+       // ...
    }
    ```
 
-2. **From Files**: Loading or generating key pairs from files in the `keys` directory.
+3. **S3 Encryption Client Creation**: The application creates an S3 encryption client using the key pair from KMS:
+   ```java
+   KmsKeyService kmsKeyService = new KmsKeyService(s3Properties.getKmsKeyId());
+   S3EncryptionClient s3EncryptionClient = kmsKeyService.createS3EncryptionClient();
+   ```
 
 ## Resources
 
@@ -122,3 +144,4 @@ The application supports two ways of creating the S3 encryption client:
 - [AWS SDK for Java Developer Guide](https://docs.aws.amazon.com/sdk-for-java/latest/developer-guide/home.html)
 - [Amazon S3 Developer Guide](https://docs.aws.amazon.com/AmazonS3/latest/dev/Welcome.html)
 - [Amazon S3 Encryption Client Documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingClientSideEncryption.html)
+- [AWS KMS Developer Guide](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html)

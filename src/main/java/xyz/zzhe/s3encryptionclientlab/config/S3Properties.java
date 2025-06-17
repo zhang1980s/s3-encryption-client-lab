@@ -11,13 +11,6 @@ public class S3Properties {
     private String region;
     private String bucketName;
     private String kmsKeyId;
-    private S3FileUploadClientConfig clientConfig;
-
-    @Data
-    public static class S3FileUploadClientConfig {
-        public String rsaPublicPem;
-        public String rsaPrivatePem;
-    }
 
     public static S3Properties loadFromProperties() {
         Properties properties = new Properties();
@@ -31,11 +24,6 @@ public class S3Properties {
             s3Properties.setRegion(properties.getProperty("aws.region"));
             s3Properties.setBucketName(properties.getProperty("aws.s3.bucket"));
             s3Properties.setKmsKeyId(properties.getProperty("aws.kms.keyId"));
-            
-            S3FileUploadClientConfig clientConfig = new S3FileUploadClientConfig();
-            clientConfig.setRsaPublicPem(properties.getProperty("aws.s3.encryption.rsa.public"));
-            clientConfig.setRsaPrivatePem(properties.getProperty("aws.s3.encryption.rsa.private"));
-            s3Properties.setClientConfig(clientConfig);
             
             return s3Properties;
         } catch (IOException ex) {
