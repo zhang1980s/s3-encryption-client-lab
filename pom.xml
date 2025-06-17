@@ -47,6 +47,11 @@
             <artifactId>amazon-s3-encryption-client-java</artifactId>
             <version>3.3.5</version>
         </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>kms</artifactId>
+            <version>${aws.java.sdk.version}</version>
+        </dependency>
 
         <!-- Logging -->
         <dependency>

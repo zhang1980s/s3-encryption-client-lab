@@ -10,6 +10,7 @@ import java.util.Properties;
 public class S3Properties {
     private String region;
     private String bucketName;
+    private String kmsKeyId;
     private S3FileUploadClientConfig clientConfig;
 
     @Data
@@ -29,6 +30,7 @@ public class S3Properties {
             S3Properties s3Properties = new S3Properties();
             s3Properties.setRegion(properties.getProperty("aws.region"));
             s3Properties.setBucketName(properties.getProperty("aws.s3.bucket"));
+            s3Properties.setKmsKeyId(properties.getProperty("aws.kms.keyId"));
             
             S3FileUploadClientConfig clientConfig = new S3FileUploadClientConfig();
             clientConfig.setRsaPublicPem(properties.getProperty("aws.s3.encryption.rsa.public"));

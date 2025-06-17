@@ -5,20 +5,15 @@ import xyz.zzhe.s3encryptionclientlab.model.FileUploadMetadata;
 import xyz.zzhe.s3encryptionclientlab.model.FileUploadResponse;
 import xyz.zzhe.s3encryptionclientlab.service.AbstractFileUploadConfig;
 import xyz.zzhe.s3encryptionclientlab.service.FileUploadService;
+import xyz.zzhe.s3encryptionclientlab.service.KmsKeyService;
 import xyz.zzhe.s3encryptionclientlab.service.S3FileUploadEncryptionService;
-import xyz.zzhe.s3encryptionclientlab.util.KeyPairUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.StringUtils;
 import software.amazon.encryption.s3.S3EncryptionClient;
 
 import java.io.File;
 import java.io.FileOutputStream;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.security.KeyPair;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -33,48 +28,18 @@ public class S3EncryptionClientLabApplication {
         try {
             // Load configuration
             S3Properties s3Properties = S3Properties.loadFromProperties();
-            log.info("Loaded S3 properties: region={}, bucket={}", s3Properties.getRegion(), s3Properties.getBucketName());
+            log.info("Loaded S3 properties: region={}, bucket={}, kmsKeyId={}",
+                    s3Properties.getRegion(), s3Properties.getBucketName(), s3Properties.getKmsKeyId());
 
-            // Generate or load RSA key pair
-            KeyPair keyPair;
-            Path keysDir = Paths.get("keys");
-            Path publicKeyPath = keysDir.resolve("public_key.pem");
-            Path privateKeyPath = keysDir.resolve("private_key.pem");
-
-            if (!Files.exists(keysDir)) {
-                Files.createDirectories(keysDir);
-            }
-
-            if (!Files.exists(publicKeyPath) || !Files.exists(privateKeyPath)) {
-                log.info("Generating new RSA key pair...");
-                keyPair = KeyPairUtil.generateRSAKeyPair();
-                KeyPairUtil.saveKeyPair(keyPair, publicKeyPath.toString(), privateKeyPath.toString());
-                log.info("RSA key pair generated and saved to {}", keysDir.toAbsolutePath());
-            } else {
-                log.info("Loading existing RSA key pair...");
-                keyPair = KeyPairUtil.loadKeyPair(publicKeyPath.toString(), privateKeyPath.toString());
-                log.info("RSA key pair loaded from {}", keysDir.toAbsolutePath());
-            }
-
-            // Try to create S3 encryption client from properties first
-            S3EncryptionClient s3EncryptionClient = createEncryptionS3Client(s3Properties.getClientConfig());
+            // Create S3 encryption client using KMS
+            S3EncryptionClient s3EncryptionClient;
             
-            // If client creation from properties failed, use the file-based key pair
-            if (s3EncryptionClient == null) {
-                log.info("Creating S3 encryption client from file-based key pair");
-                s3EncryptionClient = S3EncryptionClient.builder()
-                        .rsaKeyPair(keyPair)
-                        .build();
-                
-                // Update the properties with the generated keys for future use
-                try {
-                    String publicKeyContent = new String(Files.readAllBytes(publicKeyPath));
-                    String privateKeyContent = new String(Files.readAllBytes(privateKeyPath));
-                    s3Properties.getClientConfig().setRsaPublicPem(publicKeyContent);
-                    s3Properties.getClientConfig().setRsaPrivatePem(privateKeyContent);
-                } catch (IOException e) {
-                    log.warn("Could not read key files to update properties", e);
-                }
+            if (StringUtils.hasText(s3Properties.getKmsKeyId())) {
+                log.info("Creating S3 encryption client using KMS key: {}", s3Properties.getKmsKeyId());
+                KmsKeyService kmsKeyService = new KmsKeyService(s3Properties.getKmsKeyId());
+                s3EncryptionClient = kmsKeyService.createS3EncryptionClient();
+            } else {
+                throw new RuntimeException("KMS key ID not found in configuration");
             }
 
             // Create file upload service
@@ -134,28 +99,4 @@ public class S3EncryptionClientLabApplication {
         return tempFile;
     }
     
-    /**
-     * Creates an S3EncryptionClient from the provided client configuration.
-     *
-     * @param clientConfig The client configuration containing RSA key PEM strings
-     * @return An S3EncryptionClient instance, or null if the configuration is invalid
-     */
-    private static S3EncryptionClient createEncryptionS3Client(final S3Properties.S3FileUploadClientConfig clientConfig) {
-        if (clientConfig == null ||
-            !StringUtils.hasText(clientConfig.getRsaPrivatePem()) ||
-            !StringUtils.hasText(clientConfig.getRsaPublicPem())) {
-            log.info("No valid RSA keys found in configuration");
-            return null;
-        }
-        
-        log.info("Creating S3 encryption client from configuration PEM strings");
-        KeyPair keyPair = S3FileUploadEncryptionService.reconstructKeyPair(
-            clientConfig.getRsaPublicPem(),
-            clientConfig.getRsaPrivatePem()
-        );
-        
-        return S3EncryptionClient.builder()
-                .rsaKeyPair(keyPair)
-                .build();
-    }
 }
