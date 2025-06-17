@@ -46,11 +46,11 @@ public class KeyPairUtil {
 
     public static KeyPair loadKeyPair(String publicKeyPath, String privateKeyPath) throws IOException, NoSuchAlgorithmException, InvalidKeySpecException {
         // Load public key
-        String publicKeyPEM = new String(Files.readAllBytes(Path.of(publicKeyPath)));
+        String publicKeyPEM = new String(Files.readAllBytes(Paths.get(publicKeyPath)));
         PublicKey publicKey = loadPublicKeyFromPEM(publicKeyPEM);
 
         // Load private key
-        String privateKeyPEM = new String(Files.readAllBytes(Path.of(privateKeyPath)));
+        String privateKeyPEM = new String(Files.readAllBytes(Paths.get(privateKeyPath)));
         PrivateKey privateKey = loadPrivateKeyFromPEM(privateKeyPEM);
 
         return new KeyPair(publicKey, privateKey);

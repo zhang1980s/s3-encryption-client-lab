@@ -4,7 +4,7 @@ This lab application demonstrates how to use the Amazon S3 Encryption Client for
 
 ## Prerequisites
 
-- Java 11 (Amazon Corretto 11 recommended)
+- Java 8 (Amazon Corretto 8 recommended)
 - Maven
 - AWS account with appropriate permissions
 - AWS credentials configured
