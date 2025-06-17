@@ -1,14 +1,21 @@
 package xyz.zzhe.s3encryptionclientlab.service;
 
 import lombok.extern.slf4j.Slf4j;
+import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.services.kms.KmsClient;
 import software.amazon.awssdk.services.kms.model.*;
 import software.amazon.encryption.s3.S3EncryptionClient;
+import software.amazon.encryption.s3.materials.KmsKeyring;
 
-import java.security.KeyPair;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.Map;
-import java.util.stream.Collectors;
 
+/**
+ * Service for interacting with AWS KMS for encryption operations.
+ * This implementation uses the standard KMS import process and KMS-based encryption.
+ */
 @Slf4j
 public class KmsKeyService {
     private final KmsClient kmsClient;
@@ -19,47 +26,107 @@ public class KmsKeyService {
         this.keyId = keyId;
     }
     
-    public KeyPair getKeyPairFromKms() {
+    /**
+     * Encrypts data using KMS.
+     *
+     * @param data The data to encrypt
+     * @param context The encryption context (optional)
+     * @return The encrypted data
+     */
+    public byte[] encrypt(byte[] data, Map<String, String> context) {
         try {
-            log.info("Retrieving key pair from KMS with key ID: {}", keyId);
+            log.info("Encrypting data using KMS with key ID: {}", keyId);
             
-            // Get key tags which contain our key material
-            ListResourceTagsResponse tagsResponse = kmsClient.listResourceTags(
-                    ListResourceTagsRequest.builder()
-                            .keyId(keyId)
-                            .build());
+            EncryptRequest request = EncryptRequest.builder()
+                    .keyId(keyId)
+                    .plaintext(SdkBytes.fromByteArray(data))
+                    .encryptionContext(context != null ? context : new HashMap<>())
+                    .build();
             
-            Map<String, String> tags = tagsResponse.tags().stream()
-                    .collect(Collectors.toMap(Tag::tagKey, Tag::tagValue));
-            
-            String publicKeyContent = tags.get("PublicKey");
-            String privateKeyContent = tags.get("PrivateKey");
-            
-            if (publicKeyContent == null || privateKeyContent == null) {
-                throw new RuntimeException("Key material not found in KMS tags");
-            }
-            
-            // Format the key content back to PEM format
-            String publicKeyPem = "-----BEGIN PUBLIC KEY-----\n" + 
-                    publicKeyContent + "\n" +
-                    "-----END PUBLIC KEY-----";
-            
-            String privateKeyPem = "-----BEGIN PRIVATE KEY-----\n" + 
-                    privateKeyContent + "\n" +
-                    "-----END PRIVATE KEY-----";
-            
-            // Reconstruct the key pair
-            return xyz.zzhe.s3encryptionclientlab.util.KeyPairUtil.reconstructKeyPair(
-                    publicKeyPem, privateKeyPem);
+            EncryptResponse response = kmsClient.encrypt(request);
+            return response.ciphertextBlob().asByteArray();
         } catch (Exception e) {
-            throw new RuntimeException("Failed to retrieve key pair from KMS", e);
+            throw new RuntimeException("Failed to encrypt data using KMS", e);
         }
     }
     
+    /**
+     * Decrypts data using KMS.
+     *
+     * @param encryptedData The encrypted data
+     * @param context The encryption context (must match the one used for encryption)
+     * @return The decrypted data
+     */
+    public byte[] decrypt(byte[] encryptedData, Map<String, String> context) {
+        try {
+            log.info("Decrypting data using KMS");
+            
+            DecryptRequest request = DecryptRequest.builder()
+                    .ciphertextBlob(SdkBytes.fromByteArray(encryptedData))
+                    .keyId(keyId) // Optional but recommended for security
+                    .encryptionContext(context != null ? context : new HashMap<>())
+                    .build();
+            
+            DecryptResponse response = kmsClient.decrypt(request);
+            return response.plaintext().asByteArray();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to decrypt data using KMS", e);
+        }
+    }
+    
+    /**
+     * Creates an S3 encryption client that uses KMS for encryption operations.
+     *
+     * @return The configured S3 encryption client
+     */
     public S3EncryptionClient createS3EncryptionClient() {
-        KeyPair keyPair = getKeyPairFromKms();
+        log.info("Creating S3 encryption client with KMS for key ID: {}", keyId);
+        
+        // Create the S3 encryption client with KMS integration
         return S3EncryptionClient.builder()
-                .rsaKeyPair(keyPair)
+                .kmsKeyId(keyId)
                 .build();
+    }
+    
+    /**
+     * Verifies that the KMS key is accessible and properly configured.
+     *
+     * @return true if the key is accessible and properly configured
+     */
+    public boolean verifyKmsKeyAccess() {
+        try {
+            log.info("Verifying access to KMS key: {}", keyId);
+            
+            // Try to describe the key to verify access
+            DescribeKeyResponse response = kmsClient.describeKey(
+                    DescribeKeyRequest.builder()
+                            .keyId(keyId)
+                            .build());
+            
+            boolean isEnabled = response.keyMetadata().enabled();
+            String keyState = response.keyMetadata().keyStateAsString();
+            String keyOrigin = response.keyMetadata().originAsString();
+            
+            log.info("KMS key status - ID: {}, Enabled: {}, State: {}, Origin: {}",
+                    keyId, isEnabled, keyState, keyOrigin);
+            
+            // Check if the key is enabled and in the correct state
+            if (!isEnabled || !"Enabled".equals(keyState)) {
+                log.warn("KMS key is not in the expected state. Enabled: {}, State: {}",
+                        isEnabled, keyState);
+                return false;
+            }
+            
+            // For imported keys, verify the origin is EXTERNAL
+            if (!"EXTERNAL".equals(keyOrigin)) {
+                log.warn("KMS key does not have EXTERNAL origin. Origin: {}", keyOrigin);
+                return false;
+            }
+            
+            return true;
+        } catch (Exception e) {
+            log.error("Failed to verify KMS key access", e);
+            return false;
+        }
     }
 }

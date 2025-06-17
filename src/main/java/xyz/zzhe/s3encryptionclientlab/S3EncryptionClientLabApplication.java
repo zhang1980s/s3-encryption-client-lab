@@ -37,6 +37,15 @@ public class S3EncryptionClientLabApplication {
             if (StringUtils.hasText(s3Properties.getKmsKeyId())) {
                 log.info("Creating S3 encryption client using KMS key: {}", s3Properties.getKmsKeyId());
                 KmsKeyService kmsKeyService = new KmsKeyService(s3Properties.getKmsKeyId());
+                
+                // Verify KMS key access and configuration
+                if (!kmsKeyService.verifyKmsKeyAccess()) {
+                    log.warn("KMS key verification failed. Please ensure the key exists and has EXTERNAL origin.");
+                    log.warn("If you're using the new KMS key created by the import script, update the aws.kms.keyId in application.properties");
+                    log.warn("The new key ID can be found in the EC2 instance at: /home/ec2-user/kms_env.sh");
+                    throw new RuntimeException("KMS key verification failed");
+                }
+                
                 s3EncryptionClient = kmsKeyService.createS3EncryptionClient();
             } else {
                 throw new RuntimeException("KMS key ID not found in configuration");

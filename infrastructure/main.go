@@ -132,6 +132,15 @@ func main() {
 			return err
 		}
 
+		// Attach the AWSKeyManagementServicePowerUser policy to the role
+		_, err = iam.NewRolePolicyAttachment(ctx, "s3-encryption-lab-kms-policy-attachment", &iam.RolePolicyAttachmentArgs{
+			Role:      role.Name,
+			PolicyArn: pulumi.String("arn:aws:iam::aws:policy/AWSKeyManagementServicePowerUser"),
+		})
+		if err != nil {
+			return err
+		}
+
 		// Create an instance profile
 		instanceProfile, err := iam.NewInstanceProfile(ctx, "s3-encryption-lab-instance-profile", &iam.InstanceProfileArgs{
 			Role: role.Name,
@@ -163,21 +172,8 @@ func main() {
 			return err
 		}
 
-		// Create an EC2 instance
-		instance, err := ec2.NewInstance(ctx, "s3-encryption-lab-instance", &ec2.InstanceArgs{
-			InstanceType:        pulumi.String("t3.medium"),
-			Ami:                 pulumi.String(ami.Id),
-			SubnetId:            publicSubnet.ID(),
-			VpcSecurityGroupIds: pulumi.StringArray{securityGroup.ID()},
-			IamInstanceProfile:  instanceProfile.Name,
-			KeyName:             pulumi.String("keypair-sandbox0-sin-mymac.pem"), // Using pre-created key pair
-			Tags: pulumi.StringMap{
-				"Name": pulumi.String("s3-encryption-lab-instance"),
-			},
-		})
-		if err != nil {
-			return err
-		}
+		// We'll create the EC2 instance after preparing the user data script
+		var instance *ec2.Instance
 
 		// Create an S3 bucket
 		bucket, err := s3.NewBucketV2(ctx, "zzhe-sin-encrption-client-lab-bucket", &s3.BucketV2Args{
@@ -243,13 +239,125 @@ func main() {
 		privateKeyContent = strings.ReplaceAll(privateKeyContent, "\n", "")
 
 		// Create KMS key for S3 encryption
+		// Note: Pulumi AWS SDK doesn't directly support setting origin=EXTERNAL
+		// We'll create a standard KMS key and then use AWS CLI to create a new key with EXTERNAL origin
 		kmsKey, err := kms.NewKey(ctx, "s3-encryption-lab-kms-key", &kms.KeyArgs{
 			Description: pulumi.String("KMS key for S3 encryption client lab"),
 			KeyUsage:    pulumi.String("ENCRYPT_DECRYPT"),
 			Tags: pulumi.StringMap{
-				"Name":       pulumi.String("s3-encryption-lab-kms-key"),
-				"PublicKey":  pulumi.String(publicKeyContent),
-				"PrivateKey": pulumi.String(privateKeyContent),
+				"Name": pulumi.String("s3-encryption-lab-kms-key"),
+			},
+		})
+		if err != nil {
+			return err
+		}
+
+		// Create a script to create a new KMS key with EXTERNAL origin and import key material
+		importScript := `#!/bin/bash
+set -e
+
+# Store paths
+PUBLIC_KEY_PATH="/tmp/kms_public_key.bin"
+IMPORT_TOKEN_PATH="/tmp/import_token.bin"
+WRAPPED_KEY_PATH="/tmp/wrapped_key.bin"
+
+# Create a new KMS key with EXTERNAL origin
+echo "Creating new KMS key with EXTERNAL origin..."
+NEW_KEY_ID=$(aws kms create-key --description "KMS key for S3 encryption client lab (EXTERNAL)" \
+		--origin EXTERNAL \
+		--tags TagKey=Name,TagValue=s3-encryption-lab-kms-key-external \
+		--query 'KeyMetadata.KeyId' --output text)
+
+echo "Created new KMS key with ID: $NEW_KEY_ID"
+echo "NEW_KMS_KEY_ID=$NEW_KEY_ID" >> /home/ec2-user/kms_env.sh
+
+# Get parameters for import
+echo "Getting import parameters..."
+aws kms get-parameters-for-import \
+		--key-id $NEW_KEY_ID \
+		--wrapping-algorithm RSAES_OAEP_SHA_1 \
+		--wrapping-key-spec RSA_2048 \
+		--output text \
+		--query 'PublicKey' > $PUBLIC_KEY_PATH
+
+aws kms get-parameters-for-import \
+		--key-id $NEW_KEY_ID \
+		--wrapping-algorithm RSAES_OAEP_SHA_1 \
+		--wrapping-key-spec RSA_2048 \
+		--output text \
+		--query 'ImportToken' > $IMPORT_TOKEN_PATH
+
+# Wrap the key material using OpenSSL
+echo "Wrapping key material..."
+openssl pkeyutl \
+		-encrypt \
+		-in /home/ec2-user/keys/private_key.pem \
+		-out $WRAPPED_KEY_PATH \
+		-inkey $PUBLIC_KEY_PATH \
+		-keyform DER \
+		-pubin \
+		-pkeyopt rsa_padding_mode:oaep \
+		-pkeyopt rsa_oaep_md:sha1
+
+# Import the wrapped key material
+echo "Importing key material..."
+aws kms import-key-material \
+		--key-id $NEW_KEY_ID \
+		--encrypted-key-material fileb://$WRAPPED_KEY_PATH \
+		--import-token fileb://$IMPORT_TOKEN_PATH \
+		--expiration-model KEY_MATERIAL_DOES_NOT_EXPIRE
+
+echo "Key material imported successfully!"
+echo "Use the NEW_KMS_KEY_ID from kms_env.sh in your application"
+`
+
+		// Create a user data script to run on EC2 instance startup
+		userData := pulumi.Sprintf(`#!/bin/bash
+echo "Setting up KMS key import..."
+
+# Update system and install required packages
+yum update -y
+yum install -y openssl jq
+
+# Configure AWS CLI
+mkdir -p /home/ec2-user/.aws
+cat > /home/ec2-user/.aws/config << 'EOL'
+[default]
+region = ap-southeast-1
+output = json
+EOL
+
+# Set up key material
+mkdir -p /home/ec2-user/keys
+echo "%s" > /home/ec2-user/keys/public_key.pem
+echo "%s" > /home/ec2-user/keys/private_key.pem
+echo "%s" > /home/ec2-user/import_key_material.sh
+chmod +x /home/ec2-user/import_key_material.sh
+
+# Set environment variables
+export KMS_KEY_ID=%s
+echo "KMS_KEY_ID=$KMS_KEY_ID" > /home/ec2-user/kms_env.sh
+
+# Set proper permissions
+chown -R ec2-user:ec2-user /home/ec2-user/keys
+chown -R ec2-user:ec2-user /home/ec2-user/import_key_material.sh
+chown -R ec2-user:ec2-user /home/ec2-user/kms_env.sh
+chown -R ec2-user:ec2-user /home/ec2-user/.aws
+
+echo "Key material prepared for import. Run import_key_material.sh to complete the process."
+`, publicKeyPEM, privateKeyPEM, importScript, kmsKey.ID())
+
+		// Create the EC2 instance with the user data script
+		instance, err = ec2.NewInstance(ctx, "s3-encryption-lab-instance", &ec2.InstanceArgs{
+			InstanceType:        pulumi.String("t3.medium"),
+			Ami:                 pulumi.String(ami.Id),
+			SubnetId:            publicSubnet.ID(),
+			VpcSecurityGroupIds: pulumi.StringArray{securityGroup.ID()},
+			IamInstanceProfile:  instanceProfile.Name,
+			KeyName:             pulumi.String("keypair-sandbox0-sin-mymac.pem"), // Using pre-created key pair
+			UserData:            userData,
+			Tags: pulumi.StringMap{
+				"Name": pulumi.String("s3-encryption-lab-instance"),
 			},
 		})
 		if err != nil {
@@ -264,6 +372,7 @@ func main() {
 		ctx.Export("instanceId", instance.ID())
 		ctx.Export("instancePublicIp", instance.PublicIp)
 		ctx.Export("instancePrivateIp", instance.PrivateIp)
+		ctx.Export("importInstructions", pulumi.String("Connect to the EC2 instance and run: ./import_key_material.sh"))
 
 		return nil
 	})
