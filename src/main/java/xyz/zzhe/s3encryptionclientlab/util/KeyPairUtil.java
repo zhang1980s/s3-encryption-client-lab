@@ -58,6 +58,12 @@ public class KeyPairUtil {
 
     public static KeyPair reconstructKeyPair(String publicKeyPEM, String privateKeyPEM) {
         try {
+            // Add debug logging to check key formats
+            System.out.println("Public key PEM starts with: " +
+                (publicKeyPEM.length() > 50 ? publicKeyPEM.substring(0, 50) + "..." : publicKeyPEM));
+            System.out.println("Private key PEM starts with: " +
+                (privateKeyPEM.length() > 50 ? privateKeyPEM.substring(0, 50) + "..." : privateKeyPEM));
+                
             PublicKey publicKey = loadPublicKeyFromPEM(publicKeyPEM);
             PrivateKey privateKey = loadPrivateKeyFromPEM(privateKeyPEM);
             return new KeyPair(publicKey, privateKey);
