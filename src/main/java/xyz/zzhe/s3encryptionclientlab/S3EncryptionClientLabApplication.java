@@ -5,10 +5,9 @@ import xyz.zzhe.s3encryptionclientlab.model.FileUploadMetadata;
 import xyz.zzhe.s3encryptionclientlab.model.FileUploadResponse;
 import xyz.zzhe.s3encryptionclientlab.service.AbstractFileUploadConfig;
 import xyz.zzhe.s3encryptionclientlab.service.FileUploadService;
-import xyz.zzhe.s3encryptionclientlab.service.KmsKeyService;
+import xyz.zzhe.s3encryptionclientlab.service.LocalKeyService;
 import xyz.zzhe.s3encryptionclientlab.service.S3FileUploadEncryptionService;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.util.StringUtils;
 import software.amazon.encryption.s3.S3EncryptionClient;
 
 import java.io.File;
@@ -28,28 +27,24 @@ public class S3EncryptionClientLabApplication {
         try {
             // Load configuration
             S3Properties s3Properties = S3Properties.loadFromProperties();
-            log.info("Loaded S3 properties: region={}, bucket={}, kmsKeyId={}",
-                    s3Properties.getRegion(), s3Properties.getBucketName(), s3Properties.getKmsKeyId());
+            log.info("Loaded S3 properties: region={}, bucket={}",
+                    s3Properties.getRegion(), s3Properties.getBucketName());
 
-            // Create S3 encryption client using KMS
+            // Create S3 encryption client using local keys
             S3EncryptionClient s3EncryptionClient;
             
-            if (StringUtils.hasText(s3Properties.getKmsKeyId())) {
-                log.info("Creating S3 encryption client using KMS key: {}", s3Properties.getKmsKeyId());
-                KmsKeyService kmsKeyService = new KmsKeyService(s3Properties.getKmsKeyId());
-                
-                // Verify KMS key access and configuration
-                if (!kmsKeyService.verifyKmsKeyAccess()) {
-                    log.warn("KMS key verification failed. Please ensure the key exists and has EXTERNAL origin.");
-                    log.warn("If you're using the new KMS key created by the import script, update the aws.kms.keyId in application.properties");
-                    log.warn("The new key ID can be found in the EC2 instance at: /home/ec2-user/kms_env.sh");
-                    throw new RuntimeException("KMS key verification failed");
-                }
-                
-                s3EncryptionClient = kmsKeyService.createS3EncryptionClient();
-            } else {
-                throw new RuntimeException("KMS key ID not found in configuration");
+            // Create a LocalKeyService to handle encryption with local keys
+            log.info("Creating LocalKeyService with configuration from properties");
+            LocalKeyService localKeyService = new LocalKeyService(s3Properties);
+            
+            // Verify the key pair is valid
+            if (!localKeyService.verifyKeyPair()) {
+                log.error("Failed to verify local key pair. Please ensure the keys exist in the specified location or provide valid key content in properties.");
+                return;
             }
+            
+            // Create the S3 encryption client
+            s3EncryptionClient = localKeyService.createS3EncryptionClient();
 
             // Create file upload service
             AbstractFileUploadConfig uploadConfig = new AbstractFileUploadConfig(s3Properties.getBucketName()) {};
@@ -81,6 +76,8 @@ public class S3EncryptionClientLabApplication {
             // Get a pre-signed URL
             String signedUrl = fileUploadService.getSignedUrl(uploadResponse.getKey());
             log.info("Pre-signed URL for the file: {}", signedUrl);
+
+            log.info("S3 Encryption Client Lab completed successfully!");
 
             log.info("S3 Encryption Client Lab completed successfully!");
 
