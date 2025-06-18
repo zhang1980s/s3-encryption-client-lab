@@ -16,7 +16,7 @@ import java.security.KeyPair;
  */
 @Slf4j
 public class LocalKeyService {
-    private final KeyPair keyPair;
+    private KeyPair keyPair; // Removed final modifier to allow initialization in different paths
     private static final String DEFAULT_PUBLIC_KEY_PATH = "keys/public_key.pem";
     private static final String DEFAULT_PRIVATE_KEY_PATH = "keys/private_key.pem";
     
@@ -59,17 +59,44 @@ public class LocalKeyService {
                 
                 log.info("Attempting to load RSA key pair from {} and {}", publicKeyPath, privateKeyPath);
                 
-                // Check if files exist
+                // Check if files exist with absolute paths for debugging
+                java.nio.file.Path absPublicKeyPath = Paths.get(publicKeyPath).toAbsolutePath();
+                java.nio.file.Path absPrivateKeyPath = Paths.get(privateKeyPath).toAbsolutePath();
+                log.info("Absolute paths: public key={}, private key={}",
+                        absPublicKeyPath, absPrivateKeyPath);
+                
                 boolean publicKeyExists = Files.exists(Paths.get(publicKeyPath));
                 boolean privateKeyExists = Files.exists(Paths.get(privateKeyPath));
                 
+                log.info("Key files exist check: public key={}, private key={}",
+                        publicKeyExists, privateKeyExists);
+                
                 if (publicKeyExists && privateKeyExists) {
-                    this.keyPair = KeyPairUtil.loadKeyPair(publicKeyPath, privateKeyPath);
-                    log.info("RSA key pair loaded successfully from files");
-                    return;
+                    try {
+                        this.keyPair = KeyPairUtil.loadKeyPair(publicKeyPath, privateKeyPath);
+                        log.info("RSA key pair loaded successfully from files");
+                        return;
+                    } catch (Exception e) {
+                        log.error("Failed to load key pair from files", e);
+                        log.info("Will try fallback methods");
+                    }
                 } else {
                     log.warn("Key files not found: public key exists: {}, private key exists: {}",
                             publicKeyExists, privateKeyExists);
+                    
+                    // List directory contents for debugging
+                    try {
+                        java.nio.file.Path keyDir = Paths.get("keys").toAbsolutePath();
+                        log.info("Listing contents of keys directory: {}", keyDir);
+                        if (Files.exists(keyDir)) {
+                            Files.list(keyDir).forEach(path ->
+                                log.info("Found file: {}", path.getFileName()));
+                        } else {
+                            log.warn("Keys directory does not exist: {}", keyDir);
+                        }
+                    } catch (Exception e) {
+                        log.warn("Error listing keys directory", e);
+                    }
                 }
             } else {
                 log.info("Key paths not specified in properties");

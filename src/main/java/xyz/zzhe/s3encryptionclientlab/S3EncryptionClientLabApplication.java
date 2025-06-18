@@ -13,6 +13,7 @@ import software.amazon.encryption.s3.S3EncryptionClient;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -25,10 +26,26 @@ public class S3EncryptionClientLabApplication {
 
     public static void main(String[] args) {
         try {
+            // Log environment for debugging Docker issues
+            log.info("Starting S3 Encryption Client Lab Application");
+            log.info("Java version: {}", System.getProperty("java.version"));
+            log.info("Working directory: {}", System.getProperty("user.dir"));
+            log.info("AWS_REGION environment variable: {}", System.getenv("AWS_REGION"));
+            
+            // Check if keys directory exists
+            File keysDir = new File("keys");
+            log.info("Keys directory exists: {}, is directory: {}", keysDir.exists(), keysDir.isDirectory());
+            if (keysDir.exists()) {
+                log.info("Keys directory contents: {}", String.join(", ", keysDir.list()));
+            }
+            
             // Load configuration
+            log.info("Loading properties from application.properties");
             S3Properties s3Properties = S3Properties.loadFromProperties();
             log.info("Loaded S3 properties: region={}, bucket={}",
                     s3Properties.getRegion(), s3Properties.getBucketName());
+            log.info("Key paths configured: {}", s3Properties.hasKeyPaths());
+            log.info("Key content configured: {}", s3Properties.hasKeyContent());
 
             // Create S3 encryption client using local keys
             S3EncryptionClient s3EncryptionClient;

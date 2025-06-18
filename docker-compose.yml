@@ -1,0 +1,27 @@
+version: '3'
+
+services:
+  s3-encryption-client:
+    build: .
+    # Using EC2 instance role for AWS credentials
+    environment:
+      - AWS_REGION=${AWS_REGION:-ap-southeast-1}
+      - JAVA_TOOL_OPTIONS=-XX:+PrintGCDetails -XX:+PrintGCDateStamps -Xmx512m
+      # Add debug environment variables
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+    volumes:
+      # Mount the keys directory if you want to use local key files
+      - ./keys:/app/keys
+      # Mount the application.properties file to override settings
+      - ./src/main/resources/application.properties:/app/src/main/resources/application.properties
+      # Mount a logs directory for output
+      - ./logs:/app/logs
+    # Network mode "host" to access EC2 instance metadata service
+    network_mode: host
+    # Add healthcheck to verify container is running properly
+    healthcheck:
+      test: ["CMD", "ls", "/app/keys"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

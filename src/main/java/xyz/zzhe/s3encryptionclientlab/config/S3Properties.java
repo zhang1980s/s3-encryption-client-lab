@@ -2,6 +2,8 @@ package xyz.zzhe.s3encryptionclientlab.config;
 
 import lombok.Data;
 
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Properties;
@@ -20,12 +22,35 @@ public class S3Properties {
     private String privateKeyContent;
 
     public static S3Properties loadFromProperties() {
+        System.out.println("Loading S3Properties from application.properties");
         Properties properties = new Properties();
         try (InputStream input = S3Properties.class.getClassLoader().getResourceAsStream("application.properties")) {
             if (input == null) {
-                throw new RuntimeException("Unable to find application.properties");
+                System.err.println("ERROR: Unable to find application.properties in classpath");
+                // Try to load from file system as fallback
+                File propFile = new File("src/main/resources/application.properties");
+                if (propFile.exists()) {
+                    System.out.println("Attempting to load properties from file system: " + propFile.getAbsolutePath());
+                    try (InputStream fileInput = new FileInputStream(propFile)) {
+                        properties.load(fileInput);
+                    }
+                } else {
+                    throw new RuntimeException("Unable to find application.properties in classpath or file system");
+                }
+            } else {
+                System.out.println("Found application.properties in classpath");
+                properties.load(input);
             }
-            properties.load(input);
+            
+            // Print all properties for debugging
+            System.out.println("Loaded properties:");
+            properties.forEach((key, value) -> {
+                if (key.toString().contains("key.content")) {
+                    System.out.println(key + "=[CONTENT HIDDEN]");
+                } else {
+                    System.out.println(key + "=" + value);
+                }
+            });
             
             S3Properties s3Properties = new S3Properties();
             s3Properties.setRegion(properties.getProperty("aws.region"));

@@ -268,3 +268,76 @@ This approach provides several benefits:
 - [AWS SDK for Java Developer Guide](https://docs.aws.amazon.com/sdk-for-java/latest/developer-guide/home.html)
 - [Amazon S3 Developer Guide](https://docs.aws.amazon.com/AmazonS3/latest/dev/Welcome.html)
 - [Amazon S3 Encryption Client Documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingClientSideEncryption.html)
+
+## Running in Docker
+
+The application can also be run in a Docker container. This is useful for testing in isolated environments or for deployment scenarios.
+
+### Prerequisites for Docker
+
+- Docker installed on your system
+- Docker Compose (optional, but recommended)
+- EC2 instance with appropriate IAM role for S3 access
+
+### Building and Running with Docker
+
+1. **Build the Docker image**:
+   ```bash
+   docker build -t s3-encryption-client .
+   ```
+
+2. **Run the container using EC2 instance role**:
+   ```bash
+   docker run --network host \
+              -e AWS_REGION=ap-southeast-1 \
+              -v $(pwd)/keys:/app/keys \
+              s3-encryption-client
+   ```
+
+   The `--network host` flag allows the container to access the EC2 instance metadata service to retrieve role credentials.
+
+### Using Docker Compose
+
+Alternatively, you can use Docker Compose for a simpler setup:
+
+1. **Set your AWS region as environment variable (optional)**:
+   ```bash
+   export AWS_REGION=ap-southeast-1
+   ```
+
+2. **Run with Docker Compose**:
+   ```bash
+   docker-compose up
+   ```
+
+   The Docker Compose file is configured to use the host network mode to access the EC2 instance metadata service.
+
+### Using the Convenience Script
+
+For convenience, a shell script is provided to build and run the Docker container:
+
+1. **Make the script executable** (if not already):
+   ```bash
+   chmod +x run-docker-test.sh
+   ```
+
+2. **Run the script**:
+   ```bash
+   ./run-docker-test.sh
+   ```
+
+This script will build the Docker image and run the container with the appropriate settings, including mounting the keys directory and application.properties file.
+
+### Configuration Options
+
+- The Docker setup mounts the `keys` directory from your host into the container, allowing you to use your existing key files.
+- The `application.properties` file is also mounted, so any changes you make to it will be reflected in the container.
+- You can override environment variables in the Docker Compose file or when running the Docker container directly.
+
+### Testing in Docker
+
+Running the application in Docker provides several benefits for testing:
+- Isolated environment that doesn't affect your local system
+- Consistent environment across different development machines
+- Easy to test with different configurations by modifying environment variables
+- Simulates deployment scenarios more accurately
