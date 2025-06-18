@@ -2,6 +2,79 @@
 
 This lab application demonstrates how to use the Amazon S3 Encryption Client for Java to perform client-side encryption of data stored in Amazon S3. It uses AWS KMS for secure key management.
 
+## Current Implementation Status
+
+The application has been implemented with the following components:
+
+1. **Core Components**:
+   - `S3EncryptionClientLabApplication`: Main application class that orchestrates the workflow
+   - `KmsKeyImporter`: Service for importing key material to AWS KMS
+   - `KmsKeyService`: Service for creating S3 encryption clients using KMS keys
+   - `S3FileUploadEncryptionService`: Handles encrypted file uploads to S3
+   - `KeyPairUtil`: Utility for RSA key pair operations
+
+2. **Known Issues**:
+   - RSA Key Size Limitation: When attempting to import a new key, the application encounters an error: `javax.crypto.IllegalBlockSizeException: Data must not be longer than 190 bytes`. This occurs because the application tries to encrypt the entire private key using RSA encryption, which has size limitations.
+   - Configuration: The application.properties file contains a placeholder `${KMS_KEY_ID}` that needs to be replaced with an actual KMS key ID.
+
+3. **Implementation Details**:
+   - The application can automatically import a new KMS key if one is not configured
+   - It demonstrates the complete workflow of encrypting, uploading, downloading, and decrypting files
+   - It includes utilities for key pair generation and management
+   - It provides a simplified API for working with the S3 Encryption Client
+
+4. **Potential Fix for RSA Key Size Limitation**:
+   The current implementation attempts to encrypt the entire private key using RSA encryption, which fails due to size limitations. To fix this issue, consider:
+   
+   - Using a symmetric key (like AES) for the actual key material and then encrypting that symmetric key with RSA
+   - Using a smaller portion of the private key as the key material
+   - Implementing a chunking mechanism to encrypt the key material in smaller pieces
+   
+   Example approach using a symmetric key:
+   ```java
+   // Generate a symmetric key (e.g., AES)
+   KeyGenerator keyGen = KeyGenerator.getInstance("AES");
+   keyGen.init(256);
+   SecretKey secretKey = keyGen.generateKey();
+   byte[] keyMaterial = secretKey.getEncoded(); // Much smaller than RSA private key
+   
+   // Encrypt this smaller key material with RSA
+   byte[] encryptedKeyMaterial = encryptKeyMaterial(keyMaterial, wrappingPublicKey);
+   ```
+
+5. **AWS Credentials Configuration**:
+   The application requires valid AWS credentials to interact with AWS services. You can configure credentials in several ways:
+   
+   - **Environment Variables**:
+     ```bash
+     export AWS_ACCESS_KEY_ID=your_access_key
+     export AWS_SECRET_ACCESS_KEY=your_secret_key
+     export AWS_REGION=ap-southeast-1
+     ```
+   
+   - **AWS Credentials File**:
+     Create or edit `~/.aws/credentials`:
+     ```
+     [default]
+     aws_access_key_id=your_access_key
+     aws_secret_access_key=your_secret_key
+     ```
+     
+     And `~/.aws/config`:
+     ```
+     [default]
+     region=ap-southeast-1
+     ```
+   
+   - **System Properties**:
+     ```
+     -Daws.accessKeyId=your_access_key
+     -Daws.secretAccessKey=your_secret_key
+     -Daws.region=ap-southeast-1
+     ```
+   
+   For more information, see the [AWS SDK for Java Developer Guide](https://docs.aws.amazon.com/sdk-for-java/latest/developer-guide/credentials.html).
+
 ## Architecture
 
 ```
@@ -38,28 +111,22 @@ The application uses AWS KMS to securely store and retrieve encryption keys, whi
    Note: Pulumi will create:
    - An S3 bucket with a name like "zzhe-sin-encrption-client-lab-bucket-a9733f6"
    - A KMS key for encryption
-   - An EC2 instance with scripts to import key material into KMS
    
    The exact names and IDs will be shown in the Pulumi output.
 
 2. Import the key material into KMS:
    
-   a. Connect to the EC2 instance created by Pulumi:
+   Run the KmsKeyImportUtil to create a new KMS key and import key material:
    ```
-   ssh -i your-key.pem ec2-user@<EC2-INSTANCE-IP>
-   ```
-   
-   b. Run the key import script:
-   ```
-   ./import_key_material.sh
+   mvn exec:java -Dexec.mainClass="xyz.zzhe.s3encryptionclientlab.util.KmsKeyImportUtil" -Dexec.args="My Key Description"
    ```
    
-   c. Note the new KMS key ID with EXTERNAL origin:
-   ```
-   cat kms_env.sh
-   ```
+   The utility will:
+   - Create a new KMS key with EXTERNAL origin
+   - Import key material
+   - Output the key ID that you should use in your application.properties file
    
-   This will show the NEW_KMS_KEY_ID that you'll need to use in the application.
+   Note: The main application can also automatically import a key if one is not configured.
 
 3. Build the project:
    ```
@@ -75,7 +142,7 @@ The application uses AWS KMS to securely store and retrieve encryption keys, whi
    aws.s3.bucket=zzhe-sin-encrption-client-lab-bucket-a9733f6
    ```
    
-   b. Set the `aws.kms.keyId` property to the NEW_KMS_KEY_ID from the EC2 instance:
+   b. Set the `aws.kms.keyId` property to the key ID obtained from the KmsKeyImportUtil:
    ```properties
    aws.kms.keyId=12345678-abcd-1234-efgh-123456789012
    ```
@@ -131,6 +198,48 @@ The lab demonstrates how to generate pre-signed URLs for encrypted objects. The 
 - Encryption context
 - Key rotation
 - Cross-account access to encrypted objects
+- Importing multiple keys for different encryption purposes
+- Managing key expiration and rotation
+
+## Using the KmsKeyImporter
+
+The application includes a `KmsKeyImporter` class that simplifies the process of importing keys to KMS:
+
+1. **Import a new key programmatically**:
+   ```java
+   KmsKeyImporter keyImporter = new KmsKeyImporter();
+   String keyId = keyImporter.importNewKey("My Key Description");
+   ```
+
+2. **Use the imported key for encryption**:
+   ```java
+   KmsKeyService kmsKeyService = new KmsKeyService(keyId);
+   S3EncryptionClient s3EncryptionClient = kmsKeyService.createS3EncryptionClient();
+   ```
+
+3. **Import a key with specific parameters**:
+   ```java
+   KmsKeyImporter keyImporter = new KmsKeyImporter();
+   
+   // Create a KMS key with EXTERNAL origin
+   String keyId = keyImporter.createExternalKmsKey("My Key Description");
+   
+   // Get import parameters
+   byte[][] importParams = keyImporter.getImportParameters(keyId);
+   byte[] wrappingPublicKey = importParams[0];
+   byte[] importToken = importParams[1];
+   
+   // Encrypt and import your key material
+   byte[] keyMaterial = ...; // Your key material
+   byte[] encryptedKeyMaterial = keyImporter.encryptKeyMaterial(keyMaterial, wrappingPublicKey);
+   keyImporter.importKeyMaterial(keyId, encryptedKeyMaterial, importToken, 
+                                ExpirationModelType.KEY_MATERIAL_DOES_NOT_EXPIRE);
+   ```
+
+4. **Run the standalone utility**:
+   ```bash
+   mvn exec:java -Dexec.mainClass="xyz.zzhe.s3encryptionclientlab.util.KmsKeyImportUtil" -Dexec.args="My Key Description"
+   ```
 
 ## Key Features
 
@@ -148,13 +257,14 @@ The application uses AWS KMS for secure key management using the standard KMS im
    # Get parameters for import
    aws kms get-parameters-for-import \
      --key-id <KMS key ID> \
-     --wrapping-algorithm RSAES_OAEP_SHA_1 \
+     --wrapping-algorithm RSAES_OAEP_SHA_256 \
      --wrapping-key-spec RSA_2048
    
    # Wrap the key material using the public key from KMS
    openssl pkeyutl -encrypt -in private_key.pem -out wrapped_key.bin \
      -inkey public_key.bin -keyform DER -pubin \
-     -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha1
+     -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 \
+     -pkeyopt rsa_mgf1_md:sha256
    
    # Import the wrapped key material
    aws kms import-key-material \
@@ -162,6 +272,17 @@ The application uses AWS KMS for secure key management using the standard KMS im
      --encrypted-key-material fileb://wrapped_key.bin \
      --import-token fileb://import_token.bin \
      --expiration-model KEY_MATERIAL_DOES_NOT_EXPIRE
+   ```
+
+3. **Simplified Key Import Process**: The application now includes a simplified way to import keys to KMS:
+   ```java
+   // Import a new key to KMS in one step
+   KmsKeyImporter keyImporter = new KmsKeyImporter();
+   String keyId = keyImporter.importNewKey("My Key Description");
+   
+   // Use the key for S3 encryption
+   KmsKeyService kmsKeyService = new KmsKeyService(keyId);
+   S3EncryptionClient s3EncryptionClient = kmsKeyService.createS3EncryptionClient();
    ```
 
 3. **KMS Key Verification**: The application verifies that the KMS key is properly configured:
